@@ -61,8 +61,8 @@ TODO: add clojars link
   
 ;;construct a pool of max-size 5
 (def pool-ref (pool-party/build-pool sample-gen-fn 5
-                {:health-check-fn  health-check-fn
-                 :check-on-return? true}))
+                {:borrow-health-check-fn health-check-fn
+                 :return-health-check-fn health-check-fn}))
 
 ;;Run a function in the context of an object from the pool
 (pool-party/with-object pool-ref
@@ -74,7 +74,6 @@ TODO: add clojars link
 See their corresponding doc strings for more info.
 
 ## Remaining items:
-* Refactor `check-on-borrow?` and `check-on-return?` to just accept the health check function as parameters.
 * Add a function for shutting down the pool.
 * Add timeout support for `with-object`.
 

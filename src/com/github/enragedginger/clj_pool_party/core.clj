@@ -10,22 +10,28 @@
 (defn ^Ref build-pool
   "Builds and returns a clojure.lang.Ref representing an object pool
    Params:
-   gen-fn - 0-arity function that produces an object when called
+   gen-fn - 0-arity function that produces an object for pooling when called.
    max-size - The maximum number of objects to hold in the pool
    Optional params:
-   health-check-fn - 1-arity function to call when performing health checks for objects in the pool
+   borrow-health-check-fn - Function which takes an instance of an object from the pool that is about to
+                            be borrowed and returns a truthy value iff it's suitable for use. Otherwise,
+                            the object is removed from the pool. Note this is only called when the pool
+                            attempts to provide an object that has already been used; it is not called
+                            when the pool generates a new object using gen-fn. gen-fn should always
+                            generate a 'healthy' object. How you fulfill that guarantee or handle situations
+                            where gen-fn fails to fulfill that guarantee is up to you.
+   return-health-check-fn - Function which takes an instance of an object that is about to be returned
+                            to the pool and returns a truthy value iff it's suitable for use. Otherwise,
+                            the object is removed from the pool.
    close-fn - 1-arity function to call when closing / destroying an object in the pool"
   ([gen-fn max-size]
    (build-pool gen-fn max-size {}))
-  ([gen-fn max-size {:keys [health-check-fn close-fn check-on-borrow? check-on-return?]}]
+  ([gen-fn max-size {:keys [close-fn borrow-health-check-fn return-health-check-fn]}]
    (assert (pos? max-size) (str "max-size must be positive but was " max-size))
-   (assert (or (nil? health-check-fn) (and health-check-fn (or check-on-borrow? check-on-return?)))
-     (str "When supplying health-check-fn at least one of check-on-borrow? or check-on-return? must be true"))
    (ref
      {:gen-fn           gen-fn
-      :health-check-fn  health-check-fn
-      :check-on-borrow? check-on-borrow?
-      :check-on-return? check-on-return?
+      :borrow-health-check-fn borrow-health-check-fn
+      :return-health-check-fn return-health-check-fn
       :close-fn         close-fn
       :writer-lock      (ReentrantLock.)
       :semaphore        (Semaphore. max-size)
@@ -78,8 +84,7 @@
   [^Ref pool-ref]
   (-with-pool-writer-lock pool-ref
     (dosync
-      (let [health-check-fn (:health-check-fn @pool-ref)
-            check-on-borrow? (:check-on-borrow? @pool-ref)]
+      (let [borrow-health-check-fn (:borrow-health-check-fn @pool-ref)]
         (loop [available-objects (->> @pool-ref :objects
                                    (filter #(-> % second :available?)))]
           (if (empty? available-objects)
@@ -91,7 +96,7 @@
             (let [[k entry] (first available-objects)
                   obj (:obj entry)]
               ;;no health check or health check is positive, so return this object
-              (if (or (nil? health-check-fn) (not check-on-borrow?) (health-check-fn obj))
+              (if (or (nil? borrow-health-check-fn) (borrow-health-check-fn obj))
                 [k obj]
                 (do
                   (close-and-remove-entry pool-ref k)
@@ -102,9 +107,8 @@
   [^Ref pool-ref k]
   (-with-pool-writer-lock pool-ref
     (let [obj (get-in @pool-ref [:objects k :obj])
-          health-check-fn (:health-check-fn @pool-ref)
-          check-on-return? (:check-on-return? @pool-ref)]
-      (if (and health-check-fn check-on-return? (not (health-check-fn obj)))
+          return-health-check-fn (:return-health-check-fn @pool-ref)]
+      (if (and return-health-check-fn (not (return-health-check-fn obj)))
         (close-and-remove-entry pool-ref k)
         (dosync
           (ref-set pool-ref (assoc-in @pool-ref [:objects k :available?] true)))))))

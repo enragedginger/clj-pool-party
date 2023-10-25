@@ -7,19 +7,6 @@
   (:import (clojure.lang Ref)
            (java.util.concurrent Executors)))
 
-;;if health-check-fn is specified, then at least one of :check-on-borrow? or :check-on-return? need
-;;to be specified. Otherwise, throw an error.
-(deftest health-check-fn-booleans
-  (let [gen-fn (constantly 5)
-        max-size 5]
-    (is (thrown? AssertionError
-          (sut/build-pool gen-fn max-size {:health-check-fn identity})))
-    (is (thrown? AssertionError
-          (sut/build-pool gen-fn max-size {:health-check-fn identity :check-on-borrow? false :check-on-return? false})))
-    (sut/build-pool gen-fn max-size {:health-check-fn identity :check-on-borrow? true :check-on-return? false})
-    (sut/build-pool gen-fn max-size {:health-check-fn identity :check-on-borrow? false :check-on-return? true})
-    (sut/build-pool gen-fn max-size {:health-check-fn identity :check-on-borrow? true :check-on-return? true})))
-
 ;;non-positive max size values should result in an assertion error
 (defspec pool-max-size-pos 10
   (prop/for-all [max-size (gen/such-that #(<= % 0) gen/small-integer)]
@@ -94,8 +81,7 @@
                           (let [new-id (swap! id-atom inc)]
                             {:id new-id}))
           health-check-fn (comp even? :id)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:health-check-fn health-check-fn
-                                                                :check-on-return? true})
+          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:return-health-check-fn health-check-fn})
           times (mod n 3)
           vthread-fn (fn []
                        (sut/with-object pool-ref
@@ -120,8 +106,7 @@
                           (let [new-id (swap! id-atom + 2)]
                             (atom {:id new-id})))
           health-check-fn #(-> % deref :id even?)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:health-check-fn health-check-fn
-                                                                :check-on-borrow? true})
+          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn})
           times (mod n 3)
           vthread-fn (fn []
                        (sut/with-object pool-ref
@@ -146,9 +131,8 @@
                           (let [new-id (swap! id-atom + 2)]
                             (atom {:id new-id})))
           health-check-fn #(-> % deref :id even?)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:health-check-fn health-check-fn
-                                                                :check-on-borrow? true
-                                                                :check-on-return? true})
+          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn
+                                                                :return-health-check-fn health-check-fn})
           times (mod n 3)
           vthread-fn (fn []
                        (sut/with-object pool-ref
