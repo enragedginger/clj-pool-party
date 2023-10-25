@@ -4,7 +4,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen])
-  (:import (clojure.lang Ref)
+  (:import (clojure.lang ExceptionInfo Ref)
            (java.util.concurrent Executors)))
 
 (def gen-non-pos-nat (gen/fmap - gen/nat))
@@ -27,6 +27,31 @@
       false
       (catch AssertionError e
         true))))
+
+;;create n+1 tasks where each task sleeps for slightly longer than the wait-timeout-ms value
+;;this should create a scenario wherein exactly one task times out
+(defspec wait-timeout-exceeded 100
+  (prop/for-all [max-size (gen/no-shrink gen-pos-nat)
+                 wait-timeout-ms (gen/no-shrink gen-pos-nat)]
+    (let [gen-fn (constantly 5)
+          pool-ref (sut/build-pool gen-fn max-size {:wait-timeout-ms wait-timeout-ms})
+          vthread-fn (fn []
+                       (try
+                         (sut/with-object pool-ref
+                           (fn [obj]
+                             (Thread/sleep (+ 2 wait-timeout-ms))))
+                         false
+                         (catch ExceptionInfo e
+                           (if (-> e ex-data :wait-timeout-ms (= wait-timeout-ms))
+                             true
+                             (throw e)))))
+          tasks (repeatedly (inc max-size) (constantly vthread-fn))]
+      (with-open [exec (Executors/newVirtualThreadPerTaskExecutor)]
+        (let [results (->> (.invokeAll exec tasks)
+                        (map (memfn get))
+                        (filter identity))]
+          (= 1 (count results))))
+      )))
 
 ;;Given a generator function that produces the sequence of natural numbers (but starting at zero)
 ;;borrowing up to some multiple of the max-size should never result in a value greater than

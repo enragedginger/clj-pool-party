@@ -75,7 +75,6 @@ See their corresponding doc strings for more info.
 
 ## Remaining items:
 * Add a function for shutting down the pool.
-* Add timeout support for `with-object`.
 
 ## Dev
 
