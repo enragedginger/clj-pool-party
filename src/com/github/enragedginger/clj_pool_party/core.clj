@@ -2,7 +2,7 @@
   (:import (clojure.lang Ref)
            (java.util UUID)
            (java.util.concurrent.locks ReentrantLock)
-           (java.util.concurrent Semaphore)))
+           (java.util.concurrent Semaphore TimeUnit)))
 
 (defn- gen-key []
   (str (UUID/randomUUID)))
@@ -23,19 +23,25 @@
    return-health-check-fn - Function which takes an instance of an object that is about to be returned
                             to the pool and returns a truthy value iff it's suitable for use. Otherwise,
                             the object is removed from the pool.
-   close-fn - 1-arity function to call when closing / destroying an object in the pool"
+   close-fn - 1-arity function to call when closing / destroying an object in the pool
+   wait-timeout-ms - The number of milliseconds to wait if the pool is at max capacity. An exception
+                     is thrown if this is exceeded."
   ([gen-fn max-size]
    (build-pool gen-fn max-size {}))
-  ([gen-fn max-size {:keys [close-fn borrow-health-check-fn return-health-check-fn]}]
+  ([gen-fn max-size {:keys [close-fn borrow-health-check-fn return-health-check-fn wait-timeout-ms]}]
    (assert (pos? max-size) (str "max-size must be positive but was " max-size))
+   (assert (or (nil? wait-timeout-ms) (pos? (long wait-timeout-ms))
+             (str "wait-timeout-ms must be positive but was " wait-timeout-ms)))
    (ref
-     {:gen-fn           gen-fn
+     {:gen-fn                 gen-fn
       :borrow-health-check-fn borrow-health-check-fn
       :return-health-check-fn return-health-check-fn
-      :close-fn         close-fn
-      :writer-lock      (ReentrantLock.)
-      :semaphore        (Semaphore. max-size)
-      :objects          {}})))
+      :close-fn               close-fn
+      :wait-timeout-ms        (when wait-timeout-ms
+                                (long wait-timeout-ms))
+      :writer-lock            (ReentrantLock.)
+      :semaphore              (Semaphore. max-size)
+      :objects                {}})))
 
 (defmacro -with-pool-writer-lock
   "Executes 'body' in the context of a pool's writer lock."
@@ -51,12 +57,21 @@
   "Executes 'body' in the context of a pool's reader semaphore.
    Potentially N of these can run in parallel where N is max-size."
   [^Ref pool-ref & body]
-  `(let [^Semaphore sem# (-> ~pool-ref deref :semaphore)]
-     (try
-       (.acquire sem#)
-       ~@body
-       (finally
-         (.release sem#)))))
+  `(let [^Semaphore sem# (-> ~pool-ref deref :semaphore)
+         wait-timeout-ms# (-> ~pool-ref deref :wait-timeout-ms)]
+     (if (nil? wait-timeout-ms#)
+       (try
+         (.acquire sem#)
+         ~@body
+         (finally
+           (.release sem#)))
+       (if (.tryAcquire sem# 1 wait-timeout-ms# TimeUnit/MILLISECONDS)
+         (try
+           ~@body
+           (finally
+             (.release sem#)))
+         (throw (ex-info (str "Could not acquire pool reader lock in " wait-timeout-ms# " ms")
+                  {:wait-timeout-ms wait-timeout-ms#}))))))
 
 (defn- close-obj-safe
   "Applies close-fn to obj. Catches and prints any errors. Does nothing if close-fn is nil."
