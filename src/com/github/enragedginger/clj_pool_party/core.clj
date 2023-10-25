@@ -30,8 +30,8 @@
    (build-pool gen-fn max-size {}))
   ([gen-fn max-size {:keys [close-fn borrow-health-check-fn return-health-check-fn wait-timeout-ms]}]
    (assert (pos? max-size) (str "max-size must be positive but was " max-size))
-   (assert (or (nil? wait-timeout-ms) (pos? (long wait-timeout-ms))
-             (str "wait-timeout-ms must be positive but was " wait-timeout-ms)))
+   (assert (or (nil? wait-timeout-ms) (pos? (long wait-timeout-ms)))
+     (str "wait-timeout-ms must be positive but was " wait-timeout-ms))
    (ref
      {:gen-fn                 gen-fn
       :borrow-health-check-fn borrow-health-check-fn

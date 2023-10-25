@@ -7,11 +7,23 @@
   (:import (clojure.lang Ref)
            (java.util.concurrent Executors)))
 
+(def gen-non-pos-nat (gen/fmap - gen/nat))
+(def gen-pos-nat (gen/fmap inc gen/nat))
+
 ;;non-positive max size values should result in an assertion error
 (defspec pool-max-size-pos 10
-  (prop/for-all [max-size (gen/such-that #(<= % 0) gen/small-integer)]
+  (prop/for-all [non-pos-max-size gen-non-pos-nat]
     (try
-      (sut/build-pool (constantly 5) max-size)
+      (sut/build-pool (constantly 5) non-pos-max-size)
+      false
+      (catch AssertionError e
+        true))))
+
+(defspec wait-timeout-pos 10
+  (prop/for-all [max-size gen-pos-nat
+                 non-pos-timeout gen-non-pos-nat]
+    (try
+      (sut/build-pool (constantly 5) max-size {:wait-timeout-ms non-pos-timeout})
       false
       (catch AssertionError e
         true))))
@@ -20,7 +32,7 @@
 ;;borrowing up to some multiple of the max-size should never result in a value greater than
 ;;the max-size
 (defspec max-size-not-exceeded 100
-  (prop/for-all [max-size (gen/such-that pos? gen/nat)
+  (prop/for-all [max-size gen-pos-nat
                  n gen/nat]
     (let [id-atom (atom 0)
           sample-gen-fn (fn []
@@ -34,7 +46,7 @@
 
 ;;Same test as above but we test parallel borrowing with pmap
 (defspec max-size-not-exceeded-pmap 100
-  (prop/for-all [max-size (gen/such-that pos? gen/nat)
+  (prop/for-all [max-size gen-pos-nat
                  n gen/nat]
     (let [id-atom (atom 0)
           sample-gen-fn (fn []
@@ -52,7 +64,7 @@
 
 ;;Same test as above but we test with a virtual thread pool
 (defspec max-size-not-exceeded-vthreads 100
-  (prop/for-all [max-size (gen/such-that pos? gen/nat)
+  (prop/for-all [max-size gen-pos-nat
                  n gen/nat]
     (let [id-atom (atom 0)
           sample-gen-fn (fn []
@@ -74,8 +86,8 @@
 ;;and a check-on-return health-check-fn that designates only even numbers as "healthy"
 ;;all objects in the pool after a number of borrows should be even numbers
 (defspec health-check-fn-on-return 100
-  (prop/for-all [max-size (gen/no-shrink (gen/such-that pos? gen/nat))
-                 n (gen/no-shrink gen/nat)]
+  (prop/for-all [max-size gen-pos-nat
+                 n gen/nat]
     (let [id-atom (atom 0)
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom inc)]
@@ -99,8 +111,8 @@
 ;;and a check-on-borrow health-check-fn that designates only even numbers as "healthy"
 ;;all objects in the pool after a number of borrows should be odd numbers
 (defspec health-check-fn-on-borrow 100
-  (prop/for-all [max-size (gen/no-shrink (gen/such-that pos? gen/nat))
-                 n (gen/no-shrink gen/nat)]
+  (prop/for-all [max-size gen-pos-nat
+                 n gen/nat]
     (let [id-atom (atom 1)
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom + 2)]
@@ -124,8 +136,8 @@
 ;;and a check-on-borrow + check-on-return health-check-fn that designates only even numbers as "healthy"
 ;;the object pool should be empty
 (defspec health-check-fn-on-borrow-and-return 100
-  (prop/for-all [max-size (gen/no-shrink (gen/such-that pos? gen/nat))
-                 n (gen/no-shrink gen/nat)]
+  (prop/for-all [max-size gen-pos-nat
+                 n gen/nat]
     (let [id-atom (atom 1)
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom + 2)]
@@ -143,3 +155,6 @@
           (let [vthread (Thread. vthread-fn)]
             (.submit exec vthread))))
       (->> @pool-ref :objects empty?))))
+
+(comment
+  (run-tests *ns*))
