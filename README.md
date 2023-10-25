@@ -68,13 +68,14 @@ TODO: add clojars link
 (pool-party/with-object pool-ref
   (fn [obj]
     (println "borrowing obj:" obj)))
+    
+;;When you're done using a pool, you can remove and close all of the
+;;objects in the pool by calling evict-all
+(pool-party/evict-all pool-ref)
 ```
 
 `build-pool` and `with-object` are the important functions.
 See their corresponding doc strings for more info.
-
-## Remaining items:
-* Add a function for shutting down the pool.
 
 ## Dev
 

@@ -34,6 +34,7 @@
      (str "wait-timeout-ms must be positive but was " wait-timeout-ms))
    (ref
      {:gen-fn                 gen-fn
+      :max-size               max-size
       :borrow-health-check-fn borrow-health-check-fn
       :return-health-check-fn return-health-check-fn
       :close-fn               close-fn
@@ -83,7 +84,7 @@
         (println "Error while closing entry in pool party:" e)))))
 
 (defn- close-and-remove-entry
-  "Closes the object associated with the entry a key 'k' in the pool and removes the entry
+  "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
   [^Ref pool-ref k]
   (let [obj (get-in @pool-ref [:objects k :obj])]
@@ -136,6 +137,17 @@
       (try
         (f obj)
         (finally (return-object pool-ref k))))))
+
+(defn evict-all
+  "Acquires all locks and then closes and evicts all objects from the pool."
+  [^Ref pool-ref]
+  (let [^Semaphore sem (-> pool-ref deref :semaphore)
+        max-size (:max-size @pool-ref)]
+    (dotimes [idx max-size]
+      (.acquire sem))
+    (doseq [k (->> @pool-ref :objects keys)]
+      (close-and-remove-entry pool-ref k))
+    (.release sem max-size)))
 
 (comment
   (def id-atom
