@@ -4,7 +4,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen])
-  (:import (clojure.lang ExceptionInfo Ref)
+  (:import (clojure.lang ExceptionInfo)
            (java.util.concurrent Executors)))
 
 (def gen-non-pos-nat (gen/fmap - gen/nat))
@@ -41,12 +41,12 @@
   (prop/for-all [max-size (gen/no-shrink gen-pos-nat)
                  wait-timeout-ms (gen/no-shrink gen-pos-nat)]
     (let [gen-fn (constantly 5)
-          pool-ref (sut/build-pool gen-fn max-size {:wait-timeout-ms wait-timeout-ms})
+          pool (sut/build-pool gen-fn max-size {:wait-timeout-ms wait-timeout-ms})
           task-fn (fn []
                     (try
-                      (sut/with-object pool-ref
+                      (sut/with-object pool
                         (fn [obj]
-                          (Thread/sleep (+ 2 wait-timeout-ms))))
+                          (Thread/sleep (+ 10 wait-timeout-ms))))
                       false
                       (catch ExceptionInfo e
                         (if (-> e ex-data :wait-timeout-ms (= wait-timeout-ms))
@@ -68,10 +68,10 @@
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom inc)]
                             {:id new-id}))
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size)
+          pool (sut/build-pool sample-gen-fn max-size)
           times (mod n 3)]
       (dotimes [idx (* (inc times) max-size)]
-        (sut/with-object pool-ref identity))
+        (sut/with-object pool identity))
       (<= @id-atom max-size))))
 
 ;;Same test as above but we test parallel borrowing with pmap
@@ -82,11 +82,11 @@
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom inc)]
                             {:id new-id}))
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size)
+          pool (sut/build-pool sample-gen-fn max-size)
           times (mod n 3)]
       (dorun
         (pmap (fn [idx]
-                (sut/with-object pool-ref
+                (sut/with-object pool
                   (fn [obj]
                     (Thread/sleep 10))))
           (range (* (inc times) max-size))))
@@ -100,10 +100,10 @@
           sample-gen-fn (fn []
                           (let [new-id (swap! id-atom inc)]
                             {:id new-id}))
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size)
+          pool (sut/build-pool sample-gen-fn max-size)
           times (mod n 3)
           task-fn (fn []
-                    (sut/with-object pool-ref
+                    (sut/with-object pool
                       (fn [obj]
                         (Thread/sleep 10))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
@@ -120,15 +120,16 @@
                           (let [new-id (swap! id-atom inc)]
                             {:id new-id}))
           health-check-fn (comp even? :id)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:return-health-check-fn health-check-fn})
+          pool (sut/build-pool sample-gen-fn max-size {:return-health-check-fn health-check-fn})
           times (mod n 3)
           task-fn (fn []
-                    (sut/with-object pool-ref
+                    (sut/with-object pool
                       (fn [obj]
                         (Thread/sleep 10))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> @pool-ref :objects
-        (map #(-> % second :obj :id))
+      (->> pool (.objects)
+        (into {})
+        (map #(-> % second (.obj) :id))
         (every? even?)))))
 
 ;;given a sequence of odd numbers (starting at 1) generator function
@@ -142,15 +143,16 @@
                           (let [new-id (swap! id-atom + 2)]
                             (atom {:id new-id})))
           health-check-fn #(-> % deref :id even?)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn})
+          pool (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn})
           times (mod n 3)
           task-fn (fn []
-                    (sut/with-object pool-ref
+                    (sut/with-object pool
                       (fn [obj]
                         (assert (-> obj deref :id odd?)))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> @pool-ref :objects
-        (map #(-> % second :obj deref :id))
+      (->> pool (.objects)
+        (into {})
+        (map #(-> % second (.obj) deref :id))
         (every? odd?)))))
 
 ;;given a sequence of odd numbers (starting at 1) generator function
@@ -164,15 +166,15 @@
                           (let [new-id (swap! id-atom + 2)]
                             (atom {:id new-id})))
           health-check-fn #(-> % deref :id even?)
-          ^Ref pool-ref (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn
-                                                                :return-health-check-fn health-check-fn})
+          pool (sut/build-pool sample-gen-fn max-size {:borrow-health-check-fn health-check-fn
+                                                       :return-health-check-fn health-check-fn})
           times (mod n 3)
           task-fn (fn []
-                    (sut/with-object pool-ref
+                    (sut/with-object pool
                       (fn [obj]
                         (assert (-> obj deref :id odd?)))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> @pool-ref :objects empty?))))
+      (->> pool (.objects) (into {}) empty?))))
 
 (defspec evict-all-clears-pool 100
   (prop/for-all [max-size gen-pos-nat]
@@ -181,14 +183,14 @@
           close-fn (fn [obj]
                      (assert (= 5 obj))
                      (swap! close-called-counter inc))
-          ^Ref pool-ref (sut/build-pool gen-fn max-size {:close-fn close-fn})
+          pool (sut/build-pool gen-fn max-size {:close-fn close-fn})
           task-fn (fn []
-                    (sut/with-object pool-ref
+                    (sut/with-object pool
                       (fn [obj]
                         (Thread/sleep 10)
                         (assert (= 5 obj)))))]
       (run-vthread-tasks task-fn (* 2 max-size))
-      (sut/evict-all pool-ref)
+      (sut/evict-all pool)
       (= @close-called-counter max-size))))
 
 (comment

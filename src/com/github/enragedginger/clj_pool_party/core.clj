@@ -1,14 +1,21 @@
 (ns com.github.enragedginger.clj-pool-party.core
-  (:import (clojure.lang Ref)
-           (java.util UUID)
+  (:import (clojure.lang IFn)
+           (java.util HashMap UUID)
            (java.util.concurrent.locks ReentrantLock)
            (java.util.concurrent Semaphore TimeUnit)))
 
 (defn- gen-key []
-  (str (UUID/randomUUID)))
+  (UUID/randomUUID))
 
-(defn ^Ref build-pool
-  "Builds and returns a clojure.lang.Ref representing an object pool
+(deftype Pool [^IFn gen-fn ^Integer max-size ^IFn borrow-health-check-fn ^IFn return-health-check-fn
+               ^IFn close-fn ^Long wait-timeout-ms
+               ^ReentrantLock writer-lock ^Semaphore semaphore
+               ^HashMap objects])
+
+(deftype PoolEntry [obj available?])
+
+(defn ^Pool build-pool
+  "Builds and returns an object pool
    Params:
    gen-fn - 0-arity function that produces an object for pooling when called.
    max-size - The maximum number of objects to hold in the pool
@@ -32,22 +39,17 @@
    (assert (pos? max-size) (str "max-size must be positive but was " max-size))
    (assert (or (nil? wait-timeout-ms) (pos? (long wait-timeout-ms)))
      (str "wait-timeout-ms must be positive but was " wait-timeout-ms))
-   (ref
-     {:gen-fn                 gen-fn
-      :max-size               max-size
-      :borrow-health-check-fn borrow-health-check-fn
-      :return-health-check-fn return-health-check-fn
-      :close-fn               close-fn
-      :wait-timeout-ms        (when wait-timeout-ms
-                                (long wait-timeout-ms))
-      :writer-lock            (ReentrantLock.)
-      :semaphore              (Semaphore. max-size)
-      :objects                {}})))
+   (Pool. gen-fn max-size borrow-health-check-fn return-health-check-fn close-fn
+     (when wait-timeout-ms
+       (long wait-timeout-ms))
+     (ReentrantLock.)
+     (Semaphore. max-size)
+     (HashMap.))))
 
 (defmacro -with-pool-writer-lock
   "Executes 'body' in the context of a pool's writer lock."
-  [^Ref pool-ref & body]
-  `(let [^ReentrantLock lock# (-> ~pool-ref deref :writer-lock)]
+  [^Pool pool & body]
+  `(let [^ReentrantLock lock# (.writer-lock ~pool)]
      (try
        (.lock lock#)
        ~@body
@@ -57,9 +59,9 @@
 (defmacro -with-pool-semaphore
   "Executes 'body' in the context of a pool's reader semaphore.
    Potentially N of these can run in parallel where N is max-size."
-  [^Ref pool-ref & body]
-  `(let [^Semaphore sem# (-> ~pool-ref deref :semaphore)
-         wait-timeout-ms# (-> ~pool-ref deref :wait-timeout-ms)]
+  [^Pool pool & body]
+  `(let [^Semaphore sem# (.semaphore ~pool)
+         wait-timeout-ms# (.wait-timeout-ms ~pool)]
      (if (nil? wait-timeout-ms#)
        (try
          (.acquire sem#)
@@ -86,67 +88,71 @@
 (defn- close-and-remove-entry
   "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
-  [^Ref pool-ref k]
-  (let [obj (get-in @pool-ref [:objects k :obj])]
-    (close-obj-safe (:close-fn @pool-ref) obj)
-    (dosync
-      (ref-set pool-ref
-        (update @pool-ref :objects (fn [objects]
-                                     (dissoc objects k)))))))
+  [^Pool pool k]
+  (let [^HashMap objects-map (.objects pool)
+        ^PoolEntry entry (.get objects-map k)]
+    (close-obj-safe (.close-fn pool) (.obj entry))
+    (.remove objects-map k)))
 
 (defn- borrow-object
   "Acquires an object from the pool. Re-uses an available object if present but will
   call gen-fn if no objects are available but space remains in the pool."
-  [^Ref pool-ref]
-  (-with-pool-writer-lock pool-ref
+  [^Pool pool]
+  (-with-pool-writer-lock pool
     (dosync
-      (let [borrow-health-check-fn (:borrow-health-check-fn @pool-ref)]
-        (loop [available-objects (->> @pool-ref :objects
-                                   (filter #(-> % second :available?)))]
-          (if (empty? available-objects)
+      (let [borrow-health-check-fn (.borrow-health-check-fn pool)
+            ^HashMap objects-map (.objects pool)]
+        (loop [available-entries (->> objects-map
+                                   (into {})
+                                   (filter #(-> % second (.available?))))]
+          (if (empty? available-entries)
             ;;if there's no objects available, create a new one
             (let [k (gen-key)
-                  obj ((-> @pool-ref :gen-fn))]
-              (ref-set pool-ref (assoc-in @pool-ref [:objects k] {:obj obj :available? false}))
+                  obj ((-> pool .gen-fn))]
+              (.put objects-map k (PoolEntry. obj false))
               [k obj])
-            (let [[k entry] (first available-objects)
-                  obj (:obj entry)]
+            (let [[k entry] (first available-entries)
+                  obj (.obj entry)]
               ;;no health check or health check is positive, so return this object
               (if (or (nil? borrow-health-check-fn) (borrow-health-check-fn obj))
-                [k obj]
                 (do
-                  (close-and-remove-entry pool-ref k)
-                  (recur (rest available-objects)))))))))))
+                  (.put objects-map k (PoolEntry. obj false))
+                  [k obj])
+                (do
+                  (close-and-remove-entry pool k)
+                  (recur (rest available-entries)))))))))))
 
 (defn- return-object
   "Returns the object at key 'k' back to the pool."
-  [^Ref pool-ref k]
-  (-with-pool-writer-lock pool-ref
-    (let [obj (get-in @pool-ref [:objects k :obj])
-          return-health-check-fn (:return-health-check-fn @pool-ref)]
-      (if (and return-health-check-fn (not (return-health-check-fn obj)))
-        (close-and-remove-entry pool-ref k)
-        (dosync
-          (ref-set pool-ref (assoc-in @pool-ref [:objects k :available?] true)))))))
+  [^Pool pool k]
+  (-with-pool-writer-lock pool
+    (let [^HashMap objects-map (.objects pool)
+          ^PoolEntry entry (.get objects-map k)
+          return-health-check-fn (.return-health-check-fn pool)]
+      (if (and return-health-check-fn (-> entry (.obj) return-health-check-fn not))
+        (close-and-remove-entry pool k)
+        (.put objects-map k (PoolEntry. (.obj entry) true))))))
 
 (defn with-object
   "Borrows an object from the pool, applies it to f, and returns the result."
-  [^Ref pool-ref f]
-  (-with-pool-semaphore pool-ref
-    (let [[k obj] (borrow-object pool-ref)]
+  [^Pool pool f]
+  (-with-pool-semaphore pool
+    (let [[k obj] (borrow-object pool)]
       (try
         (f obj)
-        (finally (return-object pool-ref k))))))
+        (finally (return-object pool k))))))
 
 (defn evict-all
   "Acquires all locks and then closes and evicts all objects from the pool."
-  [^Ref pool-ref]
-  (let [^Semaphore sem (-> pool-ref deref :semaphore)
-        max-size (:max-size @pool-ref)]
+  [^Pool pool]
+  (let [^Semaphore sem (.semaphore pool)
+        max-size (.max-size pool)]
     (dotimes [idx max-size]
       (.acquire sem))
-    (doseq [k (->> @pool-ref :objects keys)]
-      (close-and-remove-entry pool-ref k))
+    (doseq [k (->> (.objects pool)
+                (into {})
+                (keys))]
+      (close-and-remove-entry pool k))
     (.release sem max-size)))
 
 (comment
