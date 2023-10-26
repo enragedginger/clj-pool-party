@@ -20,28 +20,28 @@
   (let [pool (pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (pool-party/with-object pool identity))]
-    (bench
+    (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-map-pool-party []
   (let [pool (map-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (map-pool-party/with-object pool identity))]
-    (bench
+    (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-og-pool-party []
   (let [pool (og-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (og-pool-party/with-object pool identity))]
-    (bench
+    (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-double-array-pool-party []
   (let [pool (double-array-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (double-array-pool-party/with-object pool identity))]
-    (bench
+    (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (comment

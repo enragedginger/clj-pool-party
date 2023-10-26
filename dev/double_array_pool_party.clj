@@ -6,7 +6,7 @@
 (deftype Pool [^IFn gen-fn ^Integer max-size ^IFn borrow-health-check-fn ^IFn return-health-check-fn
                ^IFn close-fn ^Long wait-timeout-ms
                ^ReentrantLock writer-lock ^Semaphore semaphore
-               objects-array availability-array])
+               ^"[Ljava.lang.Object;" objects-array ^"[Ljava.lang.Boolean;" availability-array])
 
 (defn ^Pool build-pool
   "Builds and returns an object pool
@@ -84,8 +84,8 @@
   "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
   [^Pool pool ^Integer idx]
-  (let [objects-array (.objects-array pool)
-        availability-array (.availability-array pool)
+  (let [^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+        ^"[Ljava.lang.Boolean;" availability-array (.availability-array pool)
         ^Object obj (aget objects-array idx)]
     (when obj
       (close-obj-safe (.close-fn pool) obj))
@@ -98,9 +98,9 @@
   [^Pool pool]
   (-with-pool-writer-lock pool
     (let [borrow-health-check-fn (.borrow-health-check-fn pool)
-          objects-array (.objects-array pool)
-          availability-array (.availability-array pool)
-          max-size (.max-size pool)]
+          ^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+          ^"[Ljava.lang.Boolean;" availability-array (.availability-array pool)
+          ^max-size (.max-size pool)]
       (loop [idx 0
              first-nil-idx nil]
         (cond
@@ -138,8 +138,8 @@
   "Returns the object at key 'k' back to the pool."
   [^Pool pool ^Integer idx]
   (-with-pool-writer-lock pool
-    (let [objects-array (.objects-array pool)
-          availability-array (.availability-array pool)
+    (let [^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+          ^"[Ljava.lang.Boolean;" availability-array (.availability-array pool)
           obj (aget objects-array idx)
           return-health-check-fn (.return-health-check-fn pool)]
       (if (and return-health-check-fn (-> obj return-health-check-fn not))
