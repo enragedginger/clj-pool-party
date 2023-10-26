@@ -2,7 +2,8 @@
   (:require [com.github.enragedginger.clj-pool-party.core :as pool-party]
             [double-array-pool-party :as double-array-pool-party]
             [map-pool-party :as map-pool-party]
-            [og-pool-party :as og-pool-party])
+            [og-pool-party :as og-pool-party]
+            [array-deque-pool-party :as array-deque-pool-party])
   (:import (java.util.concurrent Executors))
   (:use [criterium.core]))
 
@@ -44,9 +45,17 @@
     (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
+(defn multi-checkout-array-deque-pool-party []
+  (let [pool (array-deque-pool-party/build-pool gen-fn max-size {})
+        task-fn (fn []
+                  (array-deque-pool-party/with-object pool identity))]
+    (quick-bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
+
 (comment
   (multi-checkout)
   (multi-checkout-map-pool-party)
   (multi-checkout-og-pool-party)
   (multi-checkout-double-array-pool-party)
+  (multi-checkout-array-deque-pool-party)
   )
