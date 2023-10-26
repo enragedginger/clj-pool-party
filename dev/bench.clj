@@ -13,41 +13,40 @@
         (map (memfn get))
         (dorun)))))
 
+(def gen-fn (constantly 5))
+(def max-size 100)
+
 (defn multi-checkout []
-  (let [gen-fn (constantly 5)
-        max-size 100
-        pool (pool-party/build-pool gen-fn max-size {})
+  (let [pool (pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (pool-party/with-object pool identity))]
-    (run-vthread-tasks task-fn (* 2 max-size))))
+    (bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-map-pool-party []
-  (let [gen-fn (constantly 5)
-        max-size 100
-        pool (map-pool-party/build-pool gen-fn max-size {})
+  (let [pool (map-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (map-pool-party/with-object pool identity))]
-    (run-vthread-tasks task-fn (* 2 max-size))))
+    (bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-og-pool-party []
-  (let [gen-fn (constantly 5)
-        max-size 100
-        pool (og-pool-party/build-pool gen-fn max-size {})
+  (let [pool (og-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (og-pool-party/with-object pool identity))]
-    (run-vthread-tasks task-fn (* 2 max-size))))
+    (bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (defn multi-checkout-double-array-pool-party []
-  (let [gen-fn (constantly 5)
-        max-size 100
-        pool (double-array-pool-party/build-pool gen-fn max-size {})
+  (let [pool (double-array-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (double-array-pool-party/with-object pool identity))]
-    (run-vthread-tasks task-fn (* 2 max-size))))
+    (bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
 
 (comment
-  (quick-bench (multi-checkout))
-  (quick-bench (multi-checkout-map-pool-party))
-  (quick-bench (multi-checkout-og-pool-party))
-  (quick-bench (multi-checkout-double-array-pool-party))
+  (multi-checkout)
+  (multi-checkout-map-pool-party)
+  (multi-checkout-og-pool-party)
+  (multi-checkout-double-array-pool-party)
   )

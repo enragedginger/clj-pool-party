@@ -1,6 +1,6 @@
 (ns com.github.enragedginger.clj-pool-party.core
   (:import (clojure.lang IFn)
-           (java.util ArrayDeque)
+           (java.util HashSet)
            (java.util.concurrent.locks ReentrantLock)
            (java.util.concurrent Semaphore TimeUnit)))
 
@@ -8,8 +8,8 @@
                ^IFn close-fn ^Long wait-timeout-ms
                ^ReentrantLock writer-lock ^Semaphore semaphore
                objects-array
-               ^ArrayDeque available-occupied-indices
-               ^ArrayDeque available-unoccupied-indices])
+               ^HashSet available-occupied-indices
+               ^HashSet available-unoccupied-indices])
 
 (defn ^Pool build-pool
   "Builds and returns an object pool
@@ -42,8 +42,8 @@
      (ReentrantLock.)
      (Semaphore. max-size)
      (make-array Object max-size)
-     (ArrayDeque.)
-     (ArrayDeque. (range max-size)))))
+     (HashSet.)
+     (HashSet. (range max-size)))))
 
 (defmacro -with-pool-writer-lock
   "Executes 'body' in the context of a pool's writer lock."
@@ -88,14 +88,13 @@
   "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
   [^Pool pool ^Integer idx]
-  (let [objects-array (.objects-array pool)
-        ^Object obj (aget objects-array idx)
-        ^ArrayDeque available-unoccupied-indices (.available-unoccupied-indices pool)]
+  (let [^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+        ^Object obj (aget objects-array idx)]
     (when obj
       (close-obj-safe (.close-fn pool) obj)
       (aset objects-array idx nil)
       (.remove (.available-occupied-indices pool) idx)
-      (.push available-unoccupied-indices idx))))
+      (.add (.available-unoccupied-indices pool) idx))))
 
 (defn- borrow-object
   "Acquires an object from the pool. Re-uses an available object if present but will
@@ -103,42 +102,41 @@
   [^Pool pool]
   (-with-pool-writer-lock pool
     (let [borrow-health-check-fn (.borrow-health-check-fn pool)
-          objects-array (.objects-array pool)
-          ^ArrayDeque available-occupied-indices (.available-occupied-indices pool)
-          ^ArrayDeque available-unoccupied-indices (.available-unoccupied-indices pool)
-          pre-existing-entry (loop []
-                               (when-let [idx (.poll available-occupied-indices)]
+          ^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+          ^HashSet available-occupied-indices (.available-occupied-indices pool)
+          ^HashSet available-unoccupied-indices (.available-unoccupied-indices pool)
+          pre-existing-entry (loop [occupied-indices available-occupied-indices]
+                               (when-let [idx (first occupied-indices)]
                                  (let [obj (aget objects-array idx)]
                                    ;;no health check or health check is positive, so return this object
                                    (if (or (nil? borrow-health-check-fn) (borrow-health-check-fn obj))
                                      [idx obj]
                                      (do
                                        (close-and-remove-entry pool idx)
-                                       (recur))))))
-          entry (if pre-existing-entry
-                  pre-existing-entry
-                  (if-let [idx (.poll available-unoccupied-indices)]
-                    ;;if there's no objects available, create a new one
-                    (let [obj ((.gen-fn pool))]
-                      (aset objects-array idx obj)
-                      [idx obj])))]
-      (if entry
-        entry
-        (throw (ex-info "Entire pool is in use, but writer lock was granted. This shouldn't happen"
-                 {:pool pool})))
+                                       (recur (rest occupied-indices)))))))]
+      (if pre-existing-entry
+        pre-existing-entry
+        (if-let [idx (first available-unoccupied-indices)]
+          ;;if there's no objects available, create a new one
+          (let [obj ((.gen-fn pool))]
+            (.remove available-unoccupied-indices idx)
+            (aset objects-array idx obj)
+            [idx obj])
+          (throw (ex-info "Entire pool is in use, but writer lock was granted. This shouldn't happen"
+                   {:pool pool}))))
       )))
 
 (defn- return-object
   "Returns the object at key 'k' back to the pool."
   [^Pool pool ^Integer idx]
   (-with-pool-writer-lock pool
-    (let [objects-array (.objects-array pool)
-          ^ArrayDeque available-occupied-indices (.available-occupied-indices pool)
+    (let [^"[Ljava.lang.Object;" objects-array (.objects-array pool)
+          ^HashSet available-occupied-indices (.available-occupied-indices pool)
           obj (aget objects-array idx)
           return-health-check-fn (.return-health-check-fn pool)]
       (if (and return-health-check-fn (-> obj return-health-check-fn not))
         (close-and-remove-entry pool idx)
-        (.push available-occupied-indices idx)))))
+        (.add available-occupied-indices idx)))))
 
 (defn with-object
   "Borrows an object from the pool, applies it to f, and returns the result."
