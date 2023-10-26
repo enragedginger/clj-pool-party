@@ -37,7 +37,7 @@ which seems unnecessary. This library hasn't seen any activity since January 201
 
 ## Usage
 
-[![Clojars Project](https://img.shields.io/clojars/v/com.github.enragedginger/clj-pool-party.svg)]
+![Clojars Project](https://img.shields.io/clojars/v/com.github.enragedginger/clj-pool-party.svg)
 
 Install from Clojars:
 
