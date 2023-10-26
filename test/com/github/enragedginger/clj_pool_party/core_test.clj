@@ -127,9 +127,9 @@
                       (fn [obj]
                         (Thread/sleep 10))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> pool (.objects)
-        (into {})
-        (map #(-> % second (.obj) :id))
+      (->> pool (.objects-array)
+        (remove nil?)
+        (map :id)
         (every? even?)))))
 
 ;;given a sequence of odd numbers (starting at 1) generator function
@@ -150,9 +150,9 @@
                       (fn [obj]
                         (assert (-> obj deref :id odd?)))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> pool (.objects)
-        (into {})
-        (map #(-> % second (.obj) deref :id))
+      (->> pool (.objects-array)
+        (remove nil?)
+        (map #(-> % deref :id))
         (every? odd?)))))
 
 ;;given a sequence of odd numbers (starting at 1) generator function
@@ -174,7 +174,7 @@
                       (fn [obj]
                         (assert (-> obj deref :id odd?)))))
           results (run-vthread-tasks task-fn (* (inc times) max-size))]
-      (->> pool (.objects) (into {}) empty?))))
+      (->> pool (.objects-array) (remove nil?) empty?))))
 
 (defspec evict-all-clears-pool 100
   (prop/for-all [max-size gen-pos-nat]
@@ -187,7 +187,7 @@
           task-fn (fn []
                     (sut/with-object pool
                       (fn [obj]
-                        (Thread/sleep 10)
+                        (Thread/sleep 50)
                         (assert (= 5 obj)))))]
       (run-vthread-tasks task-fn (* 2 max-size))
       (sut/evict-all pool)

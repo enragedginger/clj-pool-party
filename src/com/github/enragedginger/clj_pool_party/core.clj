@@ -1,18 +1,12 @@
 (ns com.github.enragedginger.clj-pool-party.core
   (:import (clojure.lang IFn)
-           (java.util HashMap UUID)
            (java.util.concurrent.locks ReentrantLock)
            (java.util.concurrent Semaphore TimeUnit)))
-
-(defn- gen-key []
-  (UUID/randomUUID))
 
 (deftype Pool [^IFn gen-fn ^Integer max-size ^IFn borrow-health-check-fn ^IFn return-health-check-fn
                ^IFn close-fn ^Long wait-timeout-ms
                ^ReentrantLock writer-lock ^Semaphore semaphore
-               ^HashMap objects])
-
-(deftype PoolEntry [obj available?])
+               objects-array availability-array])
 
 (defn ^Pool build-pool
   "Builds and returns an object pool
@@ -44,7 +38,8 @@
        (long wait-timeout-ms))
      (ReentrantLock.)
      (Semaphore. max-size)
-     (HashMap.))))
+     (make-array Object max-size)
+     (make-array Boolean max-size))))
 
 (defmacro -with-pool-writer-lock
   "Executes 'body' in the context of a pool's writer lock."
@@ -88,54 +83,72 @@
 (defn- close-and-remove-entry
   "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
-  [^Pool pool k]
-  (let [^HashMap objects-map (.objects pool)
-        ^PoolEntry entry (.get objects-map k)]
-    (close-obj-safe (.close-fn pool) (.obj entry))
-    (.remove objects-map k)))
+  [^Pool pool ^Integer idx]
+  (let [objects-array (.objects-array pool)
+        availability-array (.availability-array pool)
+        ^Object obj (aget objects-array idx)]
+    (when obj
+      (close-obj-safe (.close-fn pool) obj))
+    (aset objects-array idx nil)
+    (aset availability-array idx nil)))
 
 (defn- borrow-object
   "Acquires an object from the pool. Re-uses an available object if present but will
   call gen-fn if no objects are available but space remains in the pool."
   [^Pool pool]
   (-with-pool-writer-lock pool
-    (dosync
-      (let [borrow-health-check-fn (.borrow-health-check-fn pool)
-            ^HashMap objects-map (.objects pool)]
-        (loop [available-entries (->> objects-map
-                                   (into {})
-                                   (filter #(-> % second (.available?))))]
-          (if (empty? available-entries)
-            ;;if there's no objects available, create a new one
-            (let [k (gen-key)
-                  obj ((-> pool .gen-fn))]
-              (.put objects-map k (PoolEntry. obj false))
-              [k obj])
-            (let [[k entry] (first available-entries)
-                  obj (.obj entry)]
+    (let [borrow-health-check-fn (.borrow-health-check-fn pool)
+          objects-array (.objects-array pool)
+          availability-array (.availability-array pool)
+          max-size (.max-size pool)]
+      (loop [idx 0
+             first-nil-idx nil]
+        (cond
+          (< idx max-size)
+          (case (aget availability-array idx)
+            true
+            (let [obj (aget objects-array idx)]
               ;;no health check or health check is positive, so return this object
               (if (or (nil? borrow-health-check-fn) (borrow-health-check-fn obj))
                 (do
-                  (.put objects-map k (PoolEntry. obj false))
-                  [k obj])
+                  (aset availability-array idx false)
+                  [idx obj])
                 (do
-                  (close-and-remove-entry pool k)
-                  (recur (rest available-entries)))))))))))
+                  (close-and-remove-entry pool idx)
+                  (recur (inc idx) (or first-nil-idx idx)))))
+
+            false (recur (inc idx) first-nil-idx)
+
+            nil (recur (inc idx) (or first-nil-idx idx)))
+
+          first-nil-idx
+          ;;if there's no objects available, create a new one
+          (let [obj ((.gen-fn pool))]
+            (aset objects-array first-nil-idx obj)
+            (aset availability-array first-nil-idx false)
+            [first-nil-idx obj])
+
+          :else
+          (throw (ex-info "Entire pool is in use, but writer lock was granted. This shouldn't happen"
+                   {:pool pool
+                    :idx  idx}))
+          )))))
 
 (defn- return-object
   "Returns the object at key 'k' back to the pool."
-  [^Pool pool k]
+  [^Pool pool ^Integer idx]
   (-with-pool-writer-lock pool
-    (let [^HashMap objects-map (.objects pool)
-          ^PoolEntry entry (.get objects-map k)
+    (let [objects-array (.objects-array pool)
+          availability-array (.availability-array pool)
+          obj (aget objects-array idx)
           return-health-check-fn (.return-health-check-fn pool)]
-      (if (and return-health-check-fn (-> entry (.obj) return-health-check-fn not))
-        (close-and-remove-entry pool k)
-        (.put objects-map k (PoolEntry. (.obj entry) true))))))
+      (if (and return-health-check-fn (-> obj return-health-check-fn not))
+        (close-and-remove-entry pool idx)
+        (aset availability-array idx true)))))
 
 (defn with-object
   "Borrows an object from the pool, applies it to f, and returns the result."
-  [^Pool pool f]
+  [^Pool pool ^IFn f]
   (-with-pool-semaphore pool
     (let [[k obj] (borrow-object pool)]
       (try
@@ -149,10 +162,8 @@
         max-size (.max-size pool)]
     (dotimes [idx max-size]
       (.acquire sem))
-    (doseq [k (->> (.objects pool)
-                (into {})
-                (keys))]
-      (close-and-remove-entry pool k))
+    (dotimes [idx max-size]
+      (close-and-remove-entry pool idx))
     (.release sem max-size)))
 
 (comment
