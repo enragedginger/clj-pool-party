@@ -3,6 +3,7 @@
             [double-array-pool-party :as double-array-pool-party]
             [map-pool-party :as map-pool-party]
             [og-pool-party :as og-pool-party]
+            [hash-set-pool-party :as hash-set-pool-party]
             [array-deque-pool-party :as array-deque-pool-party])
   (:import (java.util.concurrent Executors))
   (:use [criterium.core]))
@@ -52,10 +53,18 @@
     (quick-bench
       (run-vthread-tasks task-fn (* 2 max-size)))))
 
+(defn multi-checkout-hash-set-pool-party []
+  (let [pool (hash-set-pool-party/build-pool gen-fn max-size {})
+        task-fn (fn []
+                  (hash-set-pool-party/with-object pool identity))]
+    (quick-bench
+      (run-vthread-tasks task-fn (* 2 max-size)))))
+
 (comment
   (multi-checkout)
   (multi-checkout-map-pool-party)
   (multi-checkout-og-pool-party)
   (multi-checkout-double-array-pool-party)
   (multi-checkout-array-deque-pool-party)
+  (multi-checkout-hash-set-pool-party)
   )
