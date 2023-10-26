@@ -37,7 +37,11 @@ which seems unnecessary. This library hasn't seen any activity since January 201
 
 ## Usage
 
-TODO: add clojars link
+[![Clojars Project](https://img.shields.io/clojars/v/com.github.enragedginger/clj-pool-party.svg)]
+
+Install from Clojars:
+
+`[com.github.enragedginger/clj-pool-party "0.1.0"]`
 
 ```
 (ns com.example
