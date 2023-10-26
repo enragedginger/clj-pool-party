@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.11.1"]]
   :main ^:skip-aot com.github.enragedginger.clj-pool-party.core
   :target-path "target/%s"
-  :profiles {:dev {:dependencies [[org.clojure/test.check "1.1.1"]]}})
+  :profiles {:dev {:dependencies [[org.clojure/test.check "1.1.1"]
+                                  [criterium "0.4.6"]]}})

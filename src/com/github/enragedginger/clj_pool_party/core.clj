@@ -165,19 +165,3 @@
     (dotimes [idx max-size]
       (close-and-remove-entry pool idx))
     (.release sem max-size)))
-
-(comment
-  (def id-atom
-    (atom 0))
-  (defn sample-gen-fn []
-    (let [new-id (swap! id-atom inc)]
-      {:id new-id}))
-  (defn health-check-fn [x]
-    (println "checking" x (-> x :id even?))
-    (-> x :id even?))
-  (def pool-ref (build-pool sample-gen-fn 5 {:health-check-fn  health-check-fn
-                                             :check-on-return? true}))
-  (with-object pool-ref
-    (fn [obj]
-      (println "borrowing obj:" obj)))
-  )
