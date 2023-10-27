@@ -17,48 +17,49 @@
 
 (def gen-fn (constantly 5))
 (def max-size 100)
+(def times (* 2 max-size))
 
 (defn multi-checkout []
   (let [pool (pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (defn multi-checkout-map-pool-party []
   (let [pool (map-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (map-pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (defn multi-checkout-og-pool-party []
   (let [pool (og-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (og-pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (defn multi-checkout-double-array-pool-party []
   (let [pool (double-array-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (double-array-pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (defn multi-checkout-array-deque-pool-party []
   (let [pool (array-deque-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (array-deque-pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (defn multi-checkout-hash-set-pool-party []
   (let [pool (hash-set-pool-party/build-pool gen-fn max-size {})
         task-fn (fn []
                   (hash-set-pool-party/with-object pool identity))]
     (quick-bench
-      (run-vthread-tasks task-fn (* 2 max-size)))))
+      (run-vthread-tasks task-fn times))))
 
 (comment
   (multi-checkout)
