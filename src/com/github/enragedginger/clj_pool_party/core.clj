@@ -71,24 +71,15 @@
          (throw (ex-info (str "Could not acquire pool reader lock in " wait-timeout-ms# " ms")
                   {:wait-timeout-ms wait-timeout-ms#}))))))
 
-(defn- close-obj-safe
-  "Applies close-fn to obj. Catches and prints any errors. Does nothing if close-fn is nil."
-  [close-fn obj]
-  (when close-fn
-    (try
-      (close-fn obj)
-      (catch Exception e
-        (println "Error while closing entry in pool party:" e)))))
-
 (defn- close-and-remove-entry
   "Closes the object associated with the entry at key 'k' in the pool and removes the entry
   from the pool."
   [^Pool pool ^Integer idx]
   (let [^"[Ljava.lang.Object;" objects-array (.objects-array pool)
-        ^"[Ljava.lang.Boolean;" availability-array (.availability-array pool)
-        ^Object obj (aget objects-array idx)]
-    (when obj
-      (close-obj-safe (.close-fn pool) obj))
+        ^"[Ljava.lang.Boolean;" availability-array (.availability-array pool)]
+    (when-let [^Object obj (aget objects-array idx)]
+      (when-let [^IFn close-fn (.close-fn pool)]
+        (close-fn obj)))
     (aset objects-array idx nil)
     (aset availability-array idx nil)))
 
@@ -159,9 +150,15 @@
   "Acquires all locks and then closes and evicts all objects from the pool."
   [^Pool pool]
   (let [^Semaphore sem (.semaphore pool)
-        max-size (.max-size pool)]
-    (dotimes [idx max-size]
-      (.acquire sem))
-    (dotimes [idx max-size]
-      (close-and-remove-entry pool idx))
-    (.release sem max-size)))
+        ^Integer max-size (.max-size pool)
+        locks (atom 0)]
+    (try
+      (dotimes [idx max-size]
+        (.acquire sem)
+        (swap! locks inc))
+      (dotimes [idx max-size]
+        (close-and-remove-entry pool idx))
+      (finally
+        (let [lock-count @locks]
+          (when (pos? lock-count)
+            (.release sem lock-count)))))))
