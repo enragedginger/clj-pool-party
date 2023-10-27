@@ -41,7 +41,7 @@ which seems unnecessary. This library hasn't seen any activity since January 201
 
 Install from Clojars:
 
-`[com.github.enragedginger/clj-pool-party "0.1.0"]`
+`[com.github.enragedginger/clj-pool-party "0.2.0"]`
 
 ```
 (ns com.example
