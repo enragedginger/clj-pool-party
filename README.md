@@ -1,10 +1,14 @@
 # clj-pool-party
 
-Simplistic object pooling library for Clojure. Has no dependencies other than Clojure itself.
-Designed for multi-threaded environments. Supports virtual threads.
+Simplistic, performant object pooling library for Clojure.
+Has no dependencies other than Clojure itself.
+Designed for multi-threaded environments.
+Supports virtual threads.
 
-NOTE: The API for this library is currently in alpha and is subject to change.
-Please provide any feedback you may have on the usefulness of this library.
+NOTE: While this library is being used in at least one production environment,
+the API is subject to change.
+Please provide any feedback you may have on the usefulness of this library
+with respect to your own object pooling use case.
 
 ## Rationale
 
@@ -51,9 +55,12 @@ which seems unnecessary. This library hasn't seen any activity since January 201
 
 Install from Clojars:
 
-`[com.github.enragedginger/clj-pool-party "0.2.0"]`
-
+```clojure
+[com.github.enragedginger/clj-pool-party "0.2.0"]
 ```
+
+
+```clojure
 (ns com.example
   (:require [com.github.enragedginger.clj-pool-party.core :as pool-party]))
 
