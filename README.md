@@ -51,19 +51,43 @@ which seems unnecessary. This library hasn't seen any activity since January 201
 
 ## Usage
 
+Install from Clojars:
 ![Clojars Project](https://img.shields.io/clojars/v/com.github.enragedginger/clj-pool-party.svg)
 
-Install from Clojars:
-
-```clojure
-[com.github.enragedginger/clj-pool-party "0.2.0"]
-```
-
-
+Import like so:
 ```clojure
 (ns com.example
   (:require [com.github.enragedginger.clj-pool-party.core :as pool-party]))
+```
 
+`build-pool`, `with-object`, and `evict-all` are the important functions.
+See their corresponding doc strings for more info after checking out the examples below.
+
+### Basic, contrived example
+```clojure
+(ns com.example
+  (:require [com.github.enragedginger.clj-pool-party.core :as pool-party])
+  (:import (java.util UUID)))
+
+;;manage at most 5 objects in the pool
+(def max-size 5)
+
+;;generate a new UUID when necessary
+(defn gen-fn []
+  (UUID/randomUUID))
+
+;;build the pool
+(def pool (pool-party/build-pool gen-fn max-size))
+
+;;execute an arbitrary function in the context of an object from the pool
+(pool-party/with-object pool
+  (fn [uuid]
+    (println (str "borrowing obj: " uuid))))
+```
+
+### Health check example
+
+```clojure
 (def id-atom
   (atom 0))
 
@@ -81,6 +105,17 @@ Install from Clojars:
   (-> x :id even?))
   
 ;;construct a pool of max-size 5
+;;borrow-health-check-fn will be called whenever we're about to re-use
+;;an object from the pool. If it returns a non-truthy value, that object
+;;will be removed from the pool and we'll acquire a different one
+;;
+;;NOTE: borrow-health-check-fn is not called when a new object
+;;has been created by calling `gen-fn`. clj-pool-party assumes that any
+;;new, unused instances from `gen-fn` are healthy.
+;;
+;;return-health-check-fn will be called whenever we're returning an object
+;;to the pool. If it returns a non-truthy value, that object
+;;will be removed from the pool
 (def pool-ref (pool-party/build-pool sample-gen-fn 5
                 {:borrow-health-check-fn health-check-fn
                  :return-health-check-fn health-check-fn}))
@@ -89,14 +124,51 @@ Install from Clojars:
 (pool-party/with-object pool-ref
   (fn [obj]
     (println "borrowing obj:" obj)))
-    
-;;When you're done using a pool, you can remove and close all of the
-;;objects in the pool by calling evict-all
-(pool-party/evict-all pool-ref)
 ```
 
-`build-pool` and `with-object` are the important functions.
-See their corresponding doc strings for more info.
+### Using `clj-pool-party` to make calls to an HTTP server using Hato and virtual threads
+
+```clojure
+(ns com.example
+  (:require [com.github.enragedginger.clj-pool-party.core :as pool-party]
+            [hato.client :as client])
+  (:import (java.net.http HttpClient)
+           (java.util.concurrent Executors)))
+
+;;limit to just 5 concurrent requests
+(def max-size 5)
+
+;;virtual threads are great for IO tasks
+(def vthread-executor (Executors/newVirtualThreadPerTaskExecutor))
+
+;;this function will be called any time the pool needs a new HttpClient instance
+(defn build-fn []
+  (client/build-http-client {:executor vthread-executor}))
+
+(defn close-fn [^HttpClient http-client]
+  (.close http-client))
+
+;;wait at most 1 second for a connection from the pool and then throw an exception
+(def wait-timeout-ms 1000)
+
+;;build our pool
+(def pool (pool-party/build-pool build-fn max-size {:close-fn close-fn
+                                                    :wait-timeout-ms wait-timeout-ms}))
+
+;;example of using the pool to acquire an HttpClient instance and make an HTTP call
+(pool-party/with-object pool
+  (fn [^HttpClient http-client]
+    (client/get "https://www.google.com" {:http-client http-client})))
+
+;;When you're done using a pool, you can remove and close all of the
+;;objects in the pool by calling `evict-all`
+;;If `:close-fn` was defined when the pool was created, `evict-all`
+;;will pass each instance in the pool to the `close-fn`
+;;note: `evict-all` doesn't swallow errors, so if errors are likely to
+;;happen when calling `close-fn`, we recommend handling those inside of `close-fn`
+;;otherwise, `evict-all` isn't guaranteed to clean up all resources 
+(pool-party/evict-all pool-ref)
+```
 
 ## Does object pooling actually provide a performance benefit?
 This depends on a number of factors. Suppose you have some arbitrary operation, `f`.
