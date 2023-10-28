@@ -98,6 +98,37 @@ Install from Clojars:
 `build-pool` and `with-object` are the important functions.
 See their corresponding doc strings for more info.
 
+## Does object pooling actually provide a performance benefit?
+This depends on a number of factors. Suppose you have some arbitrary operation, `f`.
+1. Does `f` need to run in parallel?
+2. Does `f` require some object, `obj` whose combined creation + cleanup time is more than
+half a millisecond?
+3. Is `obj` potentially reusable across invocations of `f`?
+
+If you answered "yes" to these three questions, then object pooling with clj-pool-party is
+likely a good fit for your scenario.
+
+### Example scenario 1
+
+I have an application that makes frequent calls to third party APIs. It uses the JDK native
+internal `HttpClient` via the Hato library. Establishing a connection to an HTTP server is
+known to be expensive, so there's potential performance improvements to be gained by re-using
+connections in the pool when calling the same server repeatedly.
+
+Here's a table of the time required to make these calls when comparing pooled API calls vs
+non-pooled (i.e. new-connection-per-request) calls:
+
+Simultaneous Calls | New connection per request | clj-pool-party
+-------------------|----------------------------|---------------
+10 | 350 ms                     | 241 ms
+20 | 746 ms                     | 252 ms
+30 | 1041 ms                    | 395 ms
+
+Please note that this particular API server limits clients to 5 concurrent requests per account.
+For the `clj-pool-party` use case, we obey this restriction by setting `max-size` to 5.
+For the "new connection per request" route, we set up a basic `Semaphore` with 5 permits.
+
+
 ## Dev
 
 clj-pool-party has a mixture of unit and property based tests. If you see a gap
