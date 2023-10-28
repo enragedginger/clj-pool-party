@@ -31,13 +31,23 @@ generator function and a maximum size for the pool.
 Everything else is optional. Implementing an entire interface or learning
 the syntax of a fancy macro is needless complexity.
 
-## Benchmarks
+### Does object pooling actually provide a performance benefit?
+This depends on a number of factors. Suppose you have some arbitrary operation, `f`.
+1. Does `f` need to run in parallel?
+2. Does `f` require some object, `obj` whose combined creation + cleanup time is more than
+   half a millisecond?
+3. Is `obj` potentially reusable across invocations of `f`?
+
+If you answered "yes" to these three questions, then object pooling with clj-pool-party is
+likely a good fit for your scenario.
+
+### Benchmarks
 
 Preliminary, naive benchmarks show clj-pool-party to be faster than alternatives.
 See [clj-object-pool-benchmarks](https://github.com/enragedginger/clj-object-pool-benchmarks)
 for more details.
 
-## Why didn't you just use these other libraries?
+### Why didn't you just use these other libraries?
 * [pool](https://github.com/kul/pool) - This library wraps the Apache commons object pool.
 This is annoying in situations where you're trying to keep your dependency footprint light or
 you end up needing a different, incompatible version of a transitive dependency for some reason.
@@ -175,16 +185,6 @@ See their corresponding doc strings for more info after checking out the example
 ;;otherwise, `evict-all` isn't guaranteed to clean up all resources 
 (pool-party/evict-all pool-ref)
 ```
-
-## Does object pooling actually provide a performance benefit?
-This depends on a number of factors. Suppose you have some arbitrary operation, `f`.
-1. Does `f` need to run in parallel?
-2. Does `f` require some object, `obj` whose combined creation + cleanup time is more than
-half a millisecond?
-3. Is `obj` potentially reusable across invocations of `f`?
-
-If you answered "yes" to these three questions, then object pooling with clj-pool-party is
-likely a good fit for your scenario.
 
 ### Example scenario 1
 
