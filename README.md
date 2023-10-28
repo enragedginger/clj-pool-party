@@ -111,8 +111,9 @@ likely a good fit for your scenario.
 ### Example scenario 1
 
 I have an application that makes frequent calls to third party APIs. It uses the JDK native
-internal `HttpClient` via the Hato library. Establishing a connection to an HTTP server is
-known to be expensive, so there's potential performance improvements to be gained by re-using
+internal `HttpClient` via the [Hato](https://github.com/gnarroway/hato) library.
+Establishing a connection to an HTTP server is known to be expensive,
+so there's potential performance improvements to be gained by re-using
 connections in the pool when calling the same server repeatedly.
 
 Here's a table of the time required to make these calls when comparing pooled API calls vs
@@ -128,6 +129,8 @@ Please note that this particular API server limits clients to 5 concurrent reque
 For the `clj-pool-party` use case, we obey this restriction by setting `max-size` to 5.
 For the "new connection per request" route, we set up a basic `Semaphore` with 5 permits.
 
+Using a connection pool for HttpClient instances when making repeated, parallel calls to the same
+server provides performance benefits that scale with the number of concurrent requests.
 
 ## Dev
 
